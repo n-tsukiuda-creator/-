@@ -1,6 +1,6 @@
 {
   "name": "製作工程管理システム",
-  "description": "製造現場向けの製作工程管理・ガントチャート。図面、レーザー、ベンダー、溶接、出荷などの工程進捗を物件別・工程別で一元管理。",
+  "description": "製造現場向けの製作工程管理・ガントチャート。図面、レーザー、ベンダー、溶接、出荷などの工程進捗を複数端末でリアルタイム共同入力・共有。",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

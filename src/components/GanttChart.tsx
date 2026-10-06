@@ -21,6 +21,7 @@ import {
   ProcessStatus,
   ViewMode,
   TimeScale,
+  Collaborator,
 } from '../types';
 import {
   parseDate,
@@ -41,6 +42,8 @@ interface GanttChartProps {
   allProcesses: ProcessDefinition[];
   viewMode: ViewMode;
   timeScale: TimeScale;
+  collaborators?: Collaborator[];
+  currentUserId?: string;
   onSelectTask: (task: Task, project: Project) => void;
   onAddProcessToProject: (projectId: string) => void;
   onEditProject: (project: Project) => void;
@@ -53,6 +56,8 @@ export const GanttChart: React.FC<GanttChartProps> = ({
   allProcesses,
   viewMode,
   timeScale,
+  collaborators = [],
+  currentUserId,
   onSelectTask,
   onAddProcessToProject,
   onEditProject,
@@ -380,12 +385,15 @@ export const GanttChart: React.FC<GanttChartProps> = ({
                             project.tasks.map((task) => {
                               const procColor = getProcessColor(task.processId, project.customProcesses);
                               const isTaskOverdue = isOverdue(task.endDate, task.status, todayStr);
+                              const activeEditors = collaborators.filter((c) => c.activeTaskId === task.id && c.id !== currentUserId);
 
                               return (
                                 <div
                                   key={task.id}
                                   onClick={() => onSelectTask(task, project)}
-                                  className="h-[40px] pl-7 pr-3 flex items-center justify-between gap-2 hover:bg-slate-800/50 cursor-pointer transition-colors group"
+                                  className={`h-[40px] pl-7 pr-3 flex items-center justify-between gap-2 hover:bg-slate-800/50 cursor-pointer transition-colors group ${
+                                    activeEditors.length > 0 ? 'bg-amber-950/30 ring-1 ring-amber-500/40' : ''
+                                  }`}
                                 >
                                   {/* Process Name & Badge */}
                                   <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -399,6 +407,15 @@ export const GanttChart: React.FC<GanttChartProps> = ({
                                     {task.code && (
                                       <span className="text-[10px] font-mono text-slate-500">
                                         {task.code}
+                                      </span>
+                                    )}
+                                    {activeEditors.length > 0 && (
+                                      <span
+                                        className="text-[10px] px-1.5 py-0.2 rounded font-bold text-slate-950 flex items-center gap-1 shadow-xs animate-pulse"
+                                        style={{ backgroundColor: activeEditors[0].color || '#F59E0B' }}
+                                        title={`${activeEditors.map((e) => e.name).join(', ')} が入力中`}
+                                      >
+                                        ✏️ {activeEditors[0].name}
                                       </span>
                                     )}
                                   </div>
@@ -702,6 +719,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
                               const coords = getTaskBarCoords(task.startDate, task.endDate);
                               const procColor = getProcessColor(task.processId, project.customProcesses);
                               const isTaskOverdue = isOverdue(task.endDate, task.status, todayStr);
+                              const activeEditors = collaborators.filter((c) => c.activeTaskId === task.id && c.id !== currentUserId);
 
                               return (
                                 <div key={task.id} className="h-[40px] relative flex items-center">
@@ -718,7 +736,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
                                     }}
                                     className={`absolute h-7 rounded border cursor-pointer overflow-hidden transition-transform hover:scale-[1.01] hover:brightness-110 flex items-center px-2 shadow-sm select-none ${
                                       isTaskOverdue ? 'ring-2 ring-rose-500' : ''
-                                    }`}
+                                    } ${activeEditors.length > 0 ? 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)]' : ''}`}
                                   >
                                     {/* Progress Fill inside Bar */}
                                     <div
@@ -746,9 +764,20 @@ export const GanttChart: React.FC<GanttChartProps> = ({
                                           </span>
                                         )}
                                       </div>
-                                      <span className="font-mono text-[11px] ml-1 flex-shrink-0">
-                                        {task.progress}%
-                                      </span>
+
+                                      <div className="flex items-center gap-1.5 flex-shrink-0 ml-1">
+                                        {activeEditors.length > 0 && (
+                                          <div
+                                            className="px-1.5 py-0.2 rounded font-bold text-[9px] text-slate-950 flex items-center gap-0.5 animate-pulse shadow"
+                                            style={{ backgroundColor: activeEditors[0].color || '#F59E0B' }}
+                                          >
+                                            <span>{activeEditors[0].name}</span>
+                                          </div>
+                                        )}
+                                        <span className="font-mono text-[11px]">
+                                          {task.progress}%
+                                        </span>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>

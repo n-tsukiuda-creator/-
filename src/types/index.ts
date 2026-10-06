@@ -58,3 +58,22 @@ export interface FilterState {
   searchQuery: string;
   priority: 'all' | Priority;
 }
+
+export interface Collaborator {
+  id: string;
+  name: string;
+  role: string; // e.g. "現場主任", "レーザー担当", "溶接班", "CAD設計", "品管/出荷"
+  color: string;
+  activeTaskId?: string;
+  activeProjectId?: string;
+  lastActive: number;
+}
+
+export interface ActivityNotification {
+  id: string;
+  userName: string;
+  userColor: string;
+  message: string;
+  timestamp: number;
+}
+

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { GanttChart } from './components/GanttChart';
@@ -6,6 +6,9 @@ import { TaskEditModal } from './components/TaskEditModal';
 import { ProjectModal } from './components/ProjectModal';
 import { AddProcessModal } from './components/AddProcessModal';
 import { ProcessMasterModal } from './components/ProcessMasterModal';
+import { UserProfileModal } from './components/UserProfileModal';
+import { LiveActivityToast } from './components/LiveActivityToast';
+import { useRealtimeCollaboration } from './hooks/useRealtimeCollaboration';
 import {
   Project,
   Task,
@@ -15,11 +18,8 @@ import {
   TimeScale,
   FilterState,
 } from './types';
-import { STANDARD_PROCESSES, getInitialProjects } from './data/initialData';
 import { isOverdue, getTodayString } from './utils/dateUtils';
 
-const STORAGE_PROJECTS_KEY = 'mfg_gantt_projects_v2';
-const STORAGE_PROCESSES_KEY = 'mfg_gantt_processes_v2';
 const STORAGE_VIEWMODE_KEY = 'mfg_gantt_viewmode_v2';
 const STORAGE_TIMESCALE_KEY = 'mfg_gantt_timescale_v2';
 
@@ -27,27 +27,27 @@ export default function App() {
   const today = getTodayString();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. Core State with LocalStorage
-  const [projects, setProjects] = useState<Project[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_PROJECTS_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error('Error loading projects from localStorage', e);
-    }
-    return getInitialProjects();
-  });
+  // 1. Real-time Multi-User Collaborative State Hook
+  const {
+    currentUser,
+    collaborators,
+    connectionStatus,
+    projects,
+    setProjects,
+    standardProcesses,
+    notifications,
+    updateUserProfile,
+    setFocus,
+    updateTask,
+    deleteTask,
+    saveProject,
+    deleteProject,
+    addProcessToProject,
+    updateProcesses,
+    resetState,
+  } = useRealtimeCollaboration();
 
-  const [standardProcesses, setStandardProcesses] = useState<ProcessDefinition[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_PROCESSES_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error('Error loading processes from localStorage', e);
-    }
-    return STANDARD_PROCESSES;
-  });
-
+  // Local UI view settings
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_VIEWMODE_KEY);
@@ -64,36 +64,21 @@ export default function App() {
     return 'day';
   });
 
-  // Save to LocalStorage on updates
-  useEffect(() => {
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode);
     try {
-      localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(projects));
-    } catch (e) {
-      console.error('Failed to save projects to localStorage', e);
-    }
-  }, [projects]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_PROCESSES_KEY, JSON.stringify(standardProcesses));
-    } catch (e) {
-      console.error('Failed to save processes to localStorage', e);
-    }
-  }, [standardProcesses]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_VIEWMODE_KEY, viewMode);
+      localStorage.setItem(STORAGE_VIEWMODE_KEY, mode);
     } catch {}
-  }, [viewMode]);
+  };
 
-  useEffect(() => {
+  const handleTimeScaleChange = (scale: TimeScale) => {
+    setTimeScale(scale);
     try {
-      localStorage.setItem(STORAGE_TIMESCALE_KEY, timeScale);
+      localStorage.setItem(STORAGE_TIMESCALE_KEY, scale);
     } catch {}
-  }, [timeScale]);
+  };
 
-  // 2. Filter State
+  // 2. Filters
   const [filters, setFilters] = useState<FilterState>({
     projectId: 'all',
     processId: 'all',
@@ -102,7 +87,6 @@ export default function App() {
     priority: 'all',
   });
 
-  // Jump to Today Trigger
   const [jumpToTodayTrigger, setJumpToTodayTrigger] = useState(0);
 
   // 3. Modals State
@@ -116,8 +100,9 @@ export default function App() {
   const [addProcessTargetProjectId, setAddProcessTargetProjectId] = useState<string | undefined>(undefined);
 
   const [isProcessMasterModalOpen, setIsProcessMasterModalOpen] = useState(false);
+  const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
 
-  // Collect all processes (standard + all custom defined in any project) for filter dropdowns
+  // Combine processes for filter dropdown
   const allKnownProcesses = useMemo(() => {
     const map = new Map<string, ProcessDefinition>();
     standardProcesses.forEach((p) => map.set(p.id, p));
@@ -144,18 +129,15 @@ export default function App() {
   const filteredProjects = useMemo(() => {
     return projects
       .filter((project) => {
-        // Project ID filter
         if (filters.projectId !== 'all' && project.id !== filters.projectId) {
           return false;
         }
 
-        // Process ID filter
         if (filters.processId !== 'all') {
           const hasProcess = project.tasks.some((t) => t.processId === filters.processId);
           if (!hasProcess) return false;
         }
 
-        // Search Query filter
         if (filters.searchQuery.trim()) {
           const q = filters.searchQuery.toLowerCase();
           const matchesProject =
@@ -177,7 +159,6 @@ export default function App() {
           if (!matchesProject && !matchesAnyTask) return false;
         }
 
-        // Status Filter
         if (filters.status !== 'all') {
           if (filters.status === 'delayed') {
             const hasOverdueTask = project.tasks.some((t) => isOverdue(t.endDate, t.status, today));
@@ -192,7 +173,6 @@ export default function App() {
         return true;
       })
       .map((project) => {
-        // If a specific process or status is filtered, we also filter the visible task rows
         let tasks = project.tasks;
         if (filters.processId !== 'all') {
           tasks = tasks.filter((t) => t.processId === filters.processId);
@@ -211,37 +191,19 @@ export default function App() {
       });
   }, [projects, filters, today]);
 
-  // 5. Handlers for Task and Project Actions
+  // 5. Actions Handlers
   const handleSelectTask = (task: Task, project: Project) => {
-    // Find the full project from main state (in case filtered)
     const fullProject = projects.find((p) => p.id === project.id) || project;
     setSelectedTaskData({ task, project: fullProject });
     setIsTaskModalOpen(true);
+    // Broadcast active editing presence to other browsers
+    setFocus(task.id, project.id);
   };
 
-  const handleSaveTask = (updatedTask: Task) => {
-    setProjects((prev) =>
-      prev.map((proj) => {
-        if (proj.id !== updatedTask.projectId) return proj;
-        const updatedTasks = proj.tasks.map((t) => (t.id === updatedTask.id ? updatedTask : t));
-        return {
-          ...proj,
-          tasks: updatedTasks,
-        };
-      })
-    );
-  };
-
-  const handleDeleteTask = (taskId: string, projectId: string) => {
-    setProjects((prev) =>
-      prev.map((proj) => {
-        if (proj.id !== projectId) return proj;
-        return {
-          ...proj,
-          tasks: proj.tasks.filter((t) => t.id !== taskId),
-        };
-      })
-    );
+  const handleCloseTaskModal = () => {
+    setIsTaskModalOpen(false);
+    setSelectedTaskData(null);
+    setFocus(undefined, undefined);
   };
 
   const handleOpenNewProject = () => {
@@ -254,89 +216,12 @@ export default function App() {
     setIsProjectModalOpen(true);
   };
 
-  const handleSaveProject = (savedProject: Project) => {
-    setProjects((prev) => {
-      const exists = prev.some((p) => p.id === savedProject.id);
-      if (exists) {
-        return prev.map((p) => (p.id === savedProject.id ? savedProject : p));
-      } else {
-        return [savedProject, ...prev];
-      }
-    });
-  };
-
-  const handleDeleteProject = (projectId: string) => {
-    const target = projects.find((p) => p.id === projectId);
-    if (!target) return;
-    if (confirm(`物件「${target.name}」(製番: ${target.projectNumber}) を削除しますか？`)) {
-      setProjects((prev) => prev.filter((p) => p.id !== projectId));
-    }
-  };
-
   const handleOpenAddProcess = (projectId: string) => {
     setAddProcessTargetProjectId(projectId);
     setIsAddProcessModalOpen(true);
   };
 
-  const handleAddProcess = (
-    projectId: string,
-    processData: {
-      name: string;
-      code: string;
-      color: string;
-      startDate: string;
-      endDate: string;
-      assignedWorker?: string;
-      machineName?: string;
-      isStandard: boolean;
-      existingDefId?: string;
-    }
-  ) => {
-    setProjects((prev) =>
-      prev.map((proj) => {
-        if (proj.id !== projectId) return proj;
-
-        let processId = processData.existingDefId;
-        let customProcesses = proj.customProcesses || [];
-
-        if (!processId) {
-          processId = `custom-proc-${Date.now()}`;
-          const newDef: ProcessDefinition = {
-            id: processId,
-            name: processData.name,
-            code: processData.code,
-            color: processData.color,
-            isStandard: false,
-            category: 'custom',
-          };
-          customProcesses = [...customProcesses, newDef];
-        }
-
-        const newTask: Task = {
-          id: `task-${Date.now()}`,
-          projectId,
-          processId,
-          processName: processData.name,
-          code: processData.code,
-          startDate: processData.startDate,
-          endDate: processData.endDate,
-          status: 'not_started',
-          progress: 0,
-          assignedWorker: processData.assignedWorker,
-          machineName: processData.machineName,
-          order: (proj.tasks.length || 0) + 1,
-        };
-
-        return {
-          ...proj,
-          customProcesses,
-          tasks: [...proj.tasks, newTask],
-        };
-      })
-    );
-  };
-
-  // 6. Data Import / Export / Reset
+  // 6. Backup Export / Import / Reset
   const handleExportData = () => {
     const dataToExport = {
       version: '2.4',
@@ -349,7 +234,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `製作工程ガントデータ_${getTodayString()}.json`;
+    a.download = `製作工程ガント共同データ_${getTodayString()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -368,9 +253,7 @@ export default function App() {
         const parsed = JSON.parse(event.target?.result as string);
         if (parsed.projects && Array.isArray(parsed.projects)) {
           setProjects(parsed.projects);
-          if (parsed.standardProcesses && Array.isArray(parsed.standardProcesses)) {
-            setStandardProcesses(parsed.standardProcesses);
-          }
+          parsed.projects.forEach((p: Project) => saveProject(p));
           alert(`データを正常にインポートしました (${parsed.projects.length} 件の物件)`);
         } else {
           alert('ファイル形式が正しくありません (projects 配列が必要です)。');
@@ -380,17 +263,7 @@ export default function App() {
       }
     };
     reader.readAsText(file);
-    e.target.value = ''; // Reset input
-  };
-
-  const handleResetData = () => {
-    if (confirm('サンプル初期データ（各種板金・製缶案件と標準工程）にリセットしますか？')) {
-      const init = getInitialProjects();
-      setProjects(init);
-      setStandardProcesses(STANDARD_PROCESSES);
-      localStorage.removeItem(STORAGE_PROJECTS_KEY);
-      localStorage.removeItem(STORAGE_PROCESSES_KEY);
-    }
+    e.target.value = '';
   };
 
   return (
@@ -404,40 +277,49 @@ export default function App() {
         className="hidden"
       />
 
-      {/* 1. Industrial Header Bar */}
+      {/* Live Toast for Collaborative Activity */}
+      <LiveActivityToast notifications={notifications} />
+
+      {/* 1. Header with Multi-User Collaborative Presence */}
       <Header
         projects={projects}
+        collaborators={collaborators}
+        currentUser={currentUser}
+        connectionStatus={connectionStatus}
+        onOpenUserProfile={() => setIsUserProfileModalOpen(true)}
         onOpenNewProject={handleOpenNewProject}
         onOpenProcessMaster={() => setIsProcessMasterModalOpen(true)}
         onExportData={handleExportData}
         onImportData={handleImportDataClick}
-        onResetData={handleResetData}
+        onResetData={resetState}
       />
 
-      {/* 2. Filter Bar (Project, Process, Status, Search, Mode, TimeScale) */}
+      {/* 2. Filter Bar */}
       <FilterBar
         projects={projects}
         allProcesses={allKnownProcesses}
         filters={filters}
         onFilterChange={setFilters}
         viewMode={viewMode}
-        onViewModeChange={setViewMode}
+        onViewModeChange={handleViewModeChange}
         timeScale={timeScale}
-        onTimeScaleChange={setTimeScale}
+        onTimeScaleChange={handleTimeScaleChange}
         onJumpToToday={() => setJumpToTodayTrigger((prev) => prev + 1)}
       />
 
-      {/* 3. Main Interactive Gantt Chart */}
+      {/* 3. Main Gantt Chart with Realtime Collaborators Awareness */}
       <main className="flex-1 flex flex-col overflow-hidden">
         <GanttChart
           projects={filteredProjects}
           allProcesses={standardProcesses}
           viewMode={viewMode}
           timeScale={timeScale}
+          collaborators={collaborators}
+          currentUserId={currentUser.id}
           onSelectTask={handleSelectTask}
           onAddProcessToProject={handleOpenAddProcess}
           onEditProject={handleEditProject}
-          onDeleteProject={handleDeleteProject}
+          onDeleteProject={deleteProject}
           jumpToTodayTrigger={jumpToTodayTrigger}
         />
       </main>
@@ -447,14 +329,13 @@ export default function App() {
       {selectedTaskData && (
         <TaskEditModal
           isOpen={isTaskModalOpen}
-          onClose={() => {
-            setIsTaskModalOpen(false);
-            setSelectedTaskData(null);
-          }}
+          onClose={handleCloseTaskModal}
           task={selectedTaskData.task}
           project={selectedTaskData.project}
-          onSave={handleSaveTask}
-          onDelete={handleDeleteTask}
+          currentUser={currentUser}
+          collaborators={collaborators}
+          onSave={updateTask}
+          onDelete={deleteTask}
         />
       )}
 
@@ -467,7 +348,7 @@ export default function App() {
         }}
         projectToEdit={projectToEdit}
         allStandardProcesses={standardProcesses}
-        onSaveProject={handleSaveProject}
+        onSaveProject={saveProject}
       />
 
       {/* Add Custom/Standard Process Modal */}
@@ -477,7 +358,7 @@ export default function App() {
         projects={projects}
         selectedProjectId={addProcessTargetProjectId}
         allStandardProcesses={standardProcesses}
-        onAddProcess={handleAddProcess}
+        onAddProcess={addProcessToProject}
       />
 
       {/* Standard Processes Master Modal */}
@@ -485,7 +366,16 @@ export default function App() {
         isOpen={isProcessMasterModalOpen}
         onClose={() => setIsProcessMasterModalOpen(false)}
         processes={standardProcesses}
-        onSaveProcesses={(updated) => setStandardProcesses(updated)}
+        onSaveProcesses={updateProcesses}
+      />
+
+      {/* User Profile & Collaborative Presence Modal */}
+      <UserProfileModal
+        isOpen={isUserProfileModalOpen}
+        onClose={() => setIsUserProfileModalOpen(false)}
+        currentUser={currentUser}
+        collaborators={collaborators}
+        onSaveProfile={updateUserProfile}
       />
     </div>
   );

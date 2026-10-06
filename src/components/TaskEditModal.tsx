@@ -13,13 +13,16 @@ import {
   Layers,
   Save,
 } from 'lucide-react';
-import { Task, Project, ProcessStatus } from '../types';
+import { Task, Project, ProcessStatus, Collaborator } from '../types';
 import { getTodayString } from '../utils/dateUtils';
+import { CurrentUserProfile } from '../hooks/useRealtimeCollaboration';
 
 interface TaskEditModalProps {
   task: Task;
   project: Project;
   isOpen: boolean;
+  currentUser?: CurrentUserProfile;
+  collaborators?: Collaborator[];
   onClose: () => void;
   onSave: (updatedTask: Task) => void;
   onDelete: (taskId: string, projectId: string) => void;
@@ -29,11 +32,14 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({
   task,
   project,
   isOpen,
+  currentUser,
+  collaborators = [],
   onClose,
   onSave,
   onDelete,
 }) => {
   const today = getTodayString();
+  const otherEditors = collaborators.filter((c) => c.activeTaskId === task.id && c.id !== currentUser?.id);
 
   const [status, setStatus] = useState<ProcessStatus>(task.status);
   const [progress, setProgress] = useState<number>(task.progress);
@@ -114,9 +120,22 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({
                 {task.processName} 工程の進捗・実績入力
               </h2>
             </div>
-            <p className="text-xs text-slate-400 mt-1">
-              物件名: {project.name} ({project.clientName || '得意先未指定'})
-            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-slate-400">
+                物件名: {project.name} ({project.clientName || '得意先未指定'})
+              </span>
+              {currentUser && (
+                <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                  入力者: <strong className="text-white">{currentUser.name}</strong> ({currentUser.role})
+                </span>
+              )}
+            </div>
+
+            {otherEditors.length > 0 && (
+              <div className="mt-2 text-xs bg-amber-950/80 border border-amber-600/80 text-amber-200 px-2.5 py-1 rounded flex items-center gap-1.5 animate-pulse">
+                <span>⚠️ {otherEditors.map((e) => e.name).join(', ')} さんも現在この工程画面を開いています</span>
+              </div>
+            )}
           </div>
           <button
             onClick={onClose}
